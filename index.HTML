@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Insight Analyzer v12.1 (Real Rookie)</title>
+    <title>YouTube Insight Analyzer v13.0 (Infinity)</title>
     <style>
         :root {
             --bg-color: #121212;
@@ -40,6 +40,7 @@
         input, select, button { padding: 10px 15px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-primary); outline: none; transition: 0.2s; }
         input:focus, select:focus { border-color: var(--primary-color); }
         input[type="text"] { flex: 1; min-width: 200px; }
+        input[type="password"] { flex: 2; min-width: 250px; font-family: monospace; }
         
         .toggle-wrapper { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; color: var(--accent-color); background: rgba(255, 183, 77, 0.1); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--accent-color); }
         .toggle-wrapper input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent-color); }
@@ -75,7 +76,6 @@
         .badge-red { color: #f44336; border-color: #f44336; }
         .shorts-badge { background: var(--shorts-color); color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: none; }
 
-        /* 급성장 & 타율 뱃지 */
         .growth-badge { position: absolute; top: 10px; left: 10px; padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 4px; letter-spacing: -0.5px;}
         .growth-rookie { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; border: 1px solid #4a90e2; }
         .growth-monster { background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%); color: white; border: 1px solid #bb86fc; }
@@ -110,12 +110,12 @@
 
 <div class="container">
     <header>
-        <h1>🚀 YouTube Insight Ver 12.1 (Real Rookie)</h1>
+        <h1>🚀 YouTube Insight Ver 13.0 (Infinity)</h1>
         
-        <div class="quota-container" title="하루 10,000 단위가 제공되며, 자정에 자동 초기화됩니다.">
+        <div class="quota-container" title="여러 개의 키를 넣으면 할당량이 누적되며, 키 1개가 막히면 다음 키로 자동 전환됩니다.">
             <div class="quota-header">
-                <span class="label">🔋 일일 API 잔여량 (추정)</span>
-                <span id="quotaText">10,000 / 10,000</span>
+                <span class="label">🔋 다중 API 할당량 통합 게이지</span>
+                <span id="quotaText">0 / 0</span>
             </div>
             <div class="quota-bar-bg">
                 <div class="quota-bar-fill" id="quotaBar"></div>
@@ -125,8 +125,8 @@
 
     <div class="control-panel">
         <div class="input-group">
-            <input type="password" id="apiKey" placeholder="YouTube Data API v3 Key 입력" />
-            <button class="secondary" onclick="saveApiKey()">Key 저장</button>
+            <input type="password" id="apiKey" placeholder="API Key 여러 개 입력 (쉼표 ',' 로 구분)" title="여러 개의 키를 쉼표로 구분하여 넣으면 한도가 무한대로 늘어납니다!" />
+            <button class="secondary" onclick="saveApiKeys()">Key 저장</button>
             <label class="toggle-wrapper" title="한글/영어 동시 검색">
                 <input type="checkbox" id="globalTranslate"> 🌍 한/영 동시 탐색 (Dual)
             </label>
@@ -184,58 +184,129 @@
 
 <script>
     let globalData = [];
-    const CACHE_PREFIX = 'yt_rookie_v12_1_'; 
-    const HISTORY_KEY = 'yt_history_v12_1';
+    const CACHE_PREFIX = 'yt_infinity_v13_'; 
+    const HISTORY_KEY = 'yt_history_v13';
+    
+    // 🔋 다중 API Quota 관리 변수
+    const KEYS_STORAGE = 'yt_api_keys_array';
+    const KEY_IDX_STORAGE = 'yt_current_key_idx';
     const QUOTA_KEY = 'yt_api_quota_tracker';
-    const MAX_QUOTA = 10000;
-    const ROOKIE_DAYS_LIMIT = 180; // ✨ 신생 채널 기준: 6개월(180일)로 연장!
+    const QUOTA_PER_KEY = 10000;
+    const ROOKIE_DAYS_LIMIT = 180;
     
     const RPM_LONG = 3.5;       
     const RPM_SHORTS = 0.05;    
     const RPM_CHANNEL_AVG = 1.5; 
 
     window.onload = () => {
-        const savedKey = localStorage.getItem('yt_api_key');
-        if (savedKey) document.getElementById('apiKey').value = savedKey;
+        // 복수 키 불러오기
+        const savedKeys = JSON.parse(localStorage.getItem(KEYS_STORAGE) || "[]");
+        if (savedKeys.length > 0) {
+            document.getElementById('apiKey').value = savedKeys.join(',');
+        }
         initQuotaTracker();
         renderHistory();
     };
 
-    function saveApiKey() {
-        const key = document.getElementById('apiKey').value.trim();
-        if (key) {
-            localStorage.setItem('yt_api_key', key);
-            alert('API Key가 브라우저에 저장되었습니다.');
+    // ✨ 복수 키 파싱 및 저장 로직
+    function saveApiKeys() {
+        const rawInput = document.getElementById('apiKey').value;
+        const keysArray = rawInput.split(',').map(k => k.trim()).filter(k => k.length > 0);
+        
+        if (keysArray.length > 0) {
+            localStorage.setItem(KEYS_STORAGE, JSON.stringify(keysArray));
+            localStorage.setItem(KEY_IDX_STORAGE, "0"); // 새 키 입력 시 인덱스 초기화
+            alert(`총 ${keysArray.length}개의 API Key가 저장되었습니다.\n할당량이 ${keysArray.length * 10000}으로 확장됩니다!`);
+            initQuotaTracker();
+        } else {
+            alert('유효한 API 키를 입력해주세요.');
         }
     }
 
+    // ✨ 다중 API 할당량 통합 계산기
     function initQuotaTracker() {
+        const keys = JSON.parse(localStorage.getItem(KEYS_STORAGE) || "[]");
+        const maxQuota = keys.length * QUOTA_PER_KEY;
         const today = new Date().toDateString(); 
+        
         let quotaData = JSON.parse(localStorage.getItem(QUOTA_KEY));
         if (!quotaData || quotaData.date !== today) {
             quotaData = { date: today, used: 0 };
             localStorage.setItem(QUOTA_KEY, JSON.stringify(quotaData));
         }
-        renderQuota(quotaData.used);
+        renderQuota(quotaData.used, maxQuota);
     }
 
     function addQuotaUsage(units) {
+        const keys = JSON.parse(localStorage.getItem(KEYS_STORAGE) || "[]");
+        const maxQuota = keys.length * QUOTA_PER_KEY;
         let quotaData = JSON.parse(localStorage.getItem(QUOTA_KEY));
         quotaData.used += units;
         localStorage.setItem(QUOTA_KEY, JSON.stringify(quotaData));
-        renderQuota(quotaData.used);
+        renderQuota(quotaData.used, maxQuota);
     }
 
-    function renderQuota(used) {
-        const remaining = Math.max(0, MAX_QUOTA - used);
-        const percent = (remaining / MAX_QUOTA) * 100;
-        document.getElementById('quotaText').innerText = `${remaining.toLocaleString()} / ${MAX_QUOTA.toLocaleString()}`;
+    function renderQuota(used, maxQuota) {
+        if (maxQuota === 0) {
+            document.getElementById('quotaText').innerText = `키를 입력해주세요`;
+            document.getElementById('quotaBar').style.width = `0%`;
+            return;
+        }
+        
+        const remaining = Math.max(0, maxQuota - used);
+        const percent = (remaining / maxQuota) * 100;
+        document.getElementById('quotaText').innerText = `${remaining.toLocaleString()} / ${maxQuota.toLocaleString()}`;
+        
         const bar = document.getElementById('quotaBar');
         bar.style.width = `${percent}%`;
         if (percent > 50) bar.style.backgroundColor = 'var(--secondary-color)';
         else if (percent > 20) bar.style.backgroundColor = 'var(--warning-color)';
         else bar.style.backgroundColor = 'var(--error-color)';
     }
+
+    // 🚀 [핵심 엔진] API Key Auto-Rotation Fetch Wrapper
+    // 에러 발생 시(Quota Exceeded) 다음 키로 몰래 스위칭해서 재시도하는 무적의 함수
+    async function fetchWithRotation(urlBuilderFn, cost) {
+        const keys = JSON.parse(localStorage.getItem(KEYS_STORAGE) || "[]");
+        if (keys.length === 0) throw new Error("API 키를 먼저 저장해주세요.");
+
+        let currentIdx = parseInt(localStorage.getItem(KEY_IDX_STORAGE) || "0");
+        if (currentIdx >= keys.length) currentIdx = 0;
+
+        // 가진 키의 개수만큼 재시도(Retry) 가능
+        for (let attempt = 0; attempt < keys.length; attempt++) {
+            const activeKey = keys[currentIdx];
+            const url = urlBuilderFn(activeKey);
+            
+            try {
+                const res = await fetch(url);
+                const data = await res.json();
+
+                if (data.error) {
+                    // 403 에러이고 할당량 초과 이유라면 로테이션 가동
+                    if (data.error.code === 403 && 
+                       (data.error.message.includes("quota") || (data.error.errors && data.error.errors[0].reason === "quotaExceeded"))) {
+                        console.warn(`[API 감시망] ${currentIdx+1}번 키 사망 확인. 즉시 다음 키로 로테이션 합니다.`);
+                        currentIdx = (currentIdx + 1) % keys.length;
+                        localStorage.setItem(KEY_IDX_STORAGE, currentIdx.toString());
+                        continue; // for문 루프를 돌며 바뀐 키로 재시도
+                    }
+                    // 할당량 에러가 아닌 진짜 에러(키 오류 등)면 던짐
+                    throw new Error(data.error.message);
+                }
+                
+                // 성공했으면 쿼터 깎고 반환
+                addQuotaUsage(cost);
+                return data;
+
+            } catch (err) {
+                // fetch 자체의 네트워크 에러 등
+                throw err;
+            }
+        }
+        throw new Error("❌ 등록된 모든 API 키의 일일 할당량이 소진되었습니다! 내일 다시 시도하세요.");
+    }
+
 
     function parseDurationToSeconds(duration) {
         if(!duration) return 0;
@@ -267,14 +338,12 @@
     }
 
     async function startSearch(forceApi = false) {
-        const apiKey = document.getElementById('apiKey').value.trim();
         const originalQuery = document.getElementById('searchQuery').value.trim();
         const isGlobal = document.getElementById('globalTranslate').checked;
         const order = document.getElementById('order').value;
         const duration = document.getElementById('videoDuration').value;
         const dateFilter = document.getElementById('publishedAfter').value;
 
-        if (!apiKey) return alert("API Key를 입력해주세요.");
         if (!originalQuery) return alert("검색어를 입력해주세요.");
 
         const statusEl = document.getElementById('status');
@@ -300,38 +369,38 @@
             let searchItems = [];
 
             if (isGlobal) {
-                statusEl.innerText = "🌍 듀얼 검색 중... (한국어/영어 API 동시 호출)";
+                statusEl.innerText = "🌍 듀얼 검색 중... (다중 키 로테이션 가동 대기)";
                 const translatedQuery = await translateToEnglish(originalQuery);
                 
-                let urlKR = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&q=${encodeURIComponent(originalQuery)}&order=${order}&videoDuration=${duration}&key=${apiKey}`;
-                if (publishedAfter) urlKR += `&publishedAfter=${publishedAfter}`;
-                const resKR = await fetch(urlKR);
-                addQuotaUsage(100);
-                const dataKR = await resKR.json();
-                if (dataKR.error) throw new Error(dataKR.error.message);
+                // 한국어 검색 (Fetch Wrapper 사용)
+                const urlKR = (key) => {
+                    let u = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&q=${encodeURIComponent(originalQuery)}&order=${order}&videoDuration=${duration}&key=${key}`;
+                    if (publishedAfter) u += `&publishedAfter=${publishedAfter}`;
+                    return u;
+                };
+                const dataKR = await fetchWithRotation(urlKR, 100);
                 if (dataKR.items) searchItems.push(...dataKR.items);
 
-                let urlEN = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&q=${encodeURIComponent(translatedQuery)}&order=${order}&videoDuration=${duration}&key=${apiKey}`;
-                if (publishedAfter) urlEN += `&publishedAfter=${publishedAfter}`;
-                const resEN = await fetch(urlEN);
-                addQuotaUsage(100); 
-                const dataEN = await resEN.json();
-                if (dataEN.error) throw new Error(dataEN.error.message);
+                // 영어 검색
+                const urlEN = (key) => {
+                    let u = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&q=${encodeURIComponent(translatedQuery)}&order=${order}&videoDuration=${duration}&key=${key}`;
+                    if (publishedAfter) u += `&publishedAfter=${publishedAfter}`;
+                    return u;
+                };
+                const dataEN = await fetchWithRotation(urlEN, 100);
                 if (dataEN.items) searchItems.push(...dataEN.items);
 
             } else {
                 statusEl.innerText = "🔍 검색 API 호출 중...";
                 let nextPageToken = '';
                 for (let i = 0; i < 2; i++) {
-                    let url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&q=${encodeURIComponent(originalQuery)}&order=${order}&videoDuration=${duration}&key=${apiKey}`;
-                    if (publishedAfter) url += `&publishedAfter=${publishedAfter}`;
-                    if (nextPageToken) url += `&pageToken=${nextPageToken}`;
-
-                    const response = await fetch(url);
-                    addQuotaUsage(100); 
-                    const data = await response.json();
-                    
-                    if (data.error) throw new Error(data.error.message);
+                    const urlFn = (key) => {
+                        let u = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&q=${encodeURIComponent(originalQuery)}&order=${order}&videoDuration=${duration}&key=${key}`;
+                        if (publishedAfter) u += `&publishedAfter=${publishedAfter}`;
+                        if (nextPageToken) u += `&pageToken=${nextPageToken}`;
+                        return u;
+                    };
+                    const data = await fetchWithRotation(urlFn, 100);
                     if (data.items) searchItems.push(...data.items);
                     nextPageToken = data.nextPageToken;
                     if (!nextPageToken) break;
@@ -353,13 +422,13 @@
                 return;
             }
 
-            statusEl.innerText = `⚙️ ${searchItems.length}개 발견! 타율 분석(영상 개수 파싱)을 진행합니다...`;
+            statusEl.innerText = `⚙️ ${searchItems.length}개 발견! 타율 및 채널 통계 병합 중...`;
 
             const videoIds = searchItems.map(item => item.id.videoId);
             const channelIds = [...new Set(searchItems.map(item => item.snippet.channelId))];
 
-            const videoStats = await fetchInChunks(videoIds, 'videos', apiKey);
-            const channelStats = await fetchInChunks(channelIds, 'channels', apiKey);
+            const videoStats = await fetchInChunks(videoIds, 'videos');
+            const channelStats = await fetchInChunks(channelIds, 'channels');
 
             const currentDate = new Date();
 
@@ -392,12 +461,10 @@
                 let growthTier = 'none';
                 let growthBadgeHtml = '';
                 
-                // 타율 몬스터: 30개 이하 & 1만명 이상
                 if (videoCount > 0 && videoCount <= 30 && subs >= 10000) {
                     growthTier = 'sniper';
                     growthBadgeHtml = `<div class="growth-badge growth-sniper" title="총 영상 단 ${videoCount}개로 1만명 돌파">🎯 타율 몬스터</div>`;
                 }
-                // ✨ 수정됨: 신생 채널 기준을 180일(6개월)로 변경!
                 else if (ageInDays <= ROOKIE_DAYS_LIMIT) {
                     if (subs >= 10000) {
                         growthTier = 'monster';
@@ -457,7 +524,7 @@
                 localStorage.setItem(cacheKey, JSON.stringify(globalData));
             }
 
-            statusEl.innerText = `✅ 분석 완료! 고인물 채널을 거르고 6개월 이내 신생 채널만 필터링했습니다.`;
+            statusEl.innerText = `✅ 분석 완료! 무한 스위칭 API 엔진이 정상 동작했습니다.`;
             finishSearchProcess(originalQuery, cacheKey, order, duration, dateFilter, isGlobal);
 
         } catch (error) {
@@ -471,17 +538,18 @@
         saveToHistory(query, cacheKey, order, duration, dateFilter, isGlobal);
     }
 
-    async function fetchInChunks(ids, endpoint, apiKey) {
+    // 통계 가져올 때도 Rotation Wrapper 적용
+    async function fetchInChunks(ids, endpoint) {
         const chunkSize = 50;
         const resultMap = {};
         for (let i = 0; i < ids.length; i += chunkSize) {
             const chunk = ids.slice(i, i + chunkSize);
             const part = endpoint === 'channels' ? 'snippet,statistics' : 'statistics,contentDetails';
-            const url = `https://www.googleapis.com/youtube/v3/${endpoint}?part=${part}&id=${chunk.join(',')}&key=${apiKey}`;
             
-            const res = await fetch(url);
-            addQuotaUsage(1); 
-            const data = await res.json();
+            const urlFn = (key) => `https://www.googleapis.com/youtube/v3/${endpoint}?part=${part}&id=${chunk.join(',')}&key=${key}`;
+            
+            // 묶음 요청 1회당 1 Unit
+            const data = await fetchWithRotation(urlFn, 1);
             if (data.items) data.items.forEach(item => { resultMap[item.id] = item; });
         }
         return resultMap;
@@ -546,41 +614,28 @@
         }
     }
 
-    // --- 🚀 핵심 수정 구역: 정렬 로직 ---
     function sortData(type) {
         if (type === 'views') globalData.sort((a, b) => b.views - a.views);
         else if (type === 'subs') globalData.sort((a, b) => b.subs - a.subs);
         else if (type === 'viral') globalData.sort((a, b) => b.viralScore - a.viralScore);
         else if (type === 'revenue') globalData.sort((a, b) => b.revenue - a.revenue);
-        
+        else if (type === 'channelRevenue') globalData.sort((a, b) => b.channelRevenue - a.channelRevenue);
         else if (type === 'growth') {
             globalData.sort((a, b) => {
-                // 1. 6개월(180일) 이내인 신생 채널에게 절대적 우선순위 부여
                 const aIsNew = a.ageInDays <= ROOKIE_DAYS_LIMIT ? 1 : 0;
                 const bIsNew = b.ageInDays <= ROOKIE_DAYS_LIMIT ? 1 : 0;
-                
-                if (aIsNew !== bIsNew) {
-                    return bIsNew - aIsNew; // 신생 채널(1)이 고인물(0)보다 무조건 위로
-                }
-                // 2. 둘 다 신생 채널이거나 둘 다 고인물이라면, 일평균 구독자 증가량으로 정렬
+                if (aIsNew !== bIsNew) return bIsNew - aIsNew; 
                 return b.subsPerDay - a.subsPerDay;
             });
         }
-        
         else if (type === 'efficiency') {
             globalData.sort((a, b) => {
-                // 1. 타율 몬스터 뱃지가 있는 채널에게 절대적 우선순위 부여
                 const aIsSniper = a.growthTier === 'sniper' ? 1 : 0;
                 const bIsSniper = b.growthTier === 'sniper' ? 1 : 0;
-                
-                if (aIsSniper !== bIsSniper) {
-                    return bIsSniper - aIsSniper; 
-                }
-                // 2. 그 외에는 영상 1개당 구독자 효율로 정렬
+                if (aIsSniper !== bIsSniper) return bIsSniper - aIsSniper; 
                 return b.subsPerVideo - a.subsPerVideo;
             });
         }
-        
         renderGrid();
     }
 
@@ -694,7 +749,7 @@
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
-        link.download = `YT_RealRookie_${document.getElementById('searchQuery').value}_${new Date().getTime()}.csv`;
+        link.download = `YT_Infinity_${document.getElementById('searchQuery').value}_${new Date().getTime()}.csv`;
         link.click();
     }
 </script>
